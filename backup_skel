@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Yuweb Backup Script
-# kurt/yuweb <garnier.etienne@gmail.com>
+# kurt/yuweb <garnier.etienne-at-gmail.com>
 
 # Application sources options
 APP_NAME=""
