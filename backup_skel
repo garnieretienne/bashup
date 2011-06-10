@@ -1,0 +1,198 @@
+#!/bin/bash
+#
+# Yuweb Backup Script
+# kurt/yuweb <garnier.etienne@gmail.com>
+
+# Application sources options
+APP_NAME=""
+FOLDER_NAME=`readlink /var/rails/${APP_NAME}/current | awk -F / '{print $NF}'`
+APP_PATH="/var/rails/${APP_NAME}/releases/"$FOLDER_NAME
+EXCLUDE=( tmp/* log/* )
+
+# Application database options
+DB_SERVER=""
+DB_USER=""
+DB_PASS=""
+DB_NAME="" 
+
+# System options
+TMP="/tmp"
+BACKUP_DIR="/root/backups"
+BACKUP_DB=$BACKUP_DIR"/db"
+
+# Report to options
+EMAILS=( )
+
+# Variables
+DATE=`date +%Y-%m-%d-%s`
+BUFFER=( )
+
+#Debug
+#echo "APP NAME  :" $APP_NAME
+#echo "APP PATH  :" $APP_PATH
+#echo "DB SERVER :" $DB_SERVER
+#echo "DB USER   :" $DB_USER
+#echo "DB PASS   :" $DB_PASS
+#echo "DB NAME   :" $DB_NAME
+#echo "TMP       :" $TMP
+#echo "DATE      :" $DATE
+
+# Verify the current user
+function verify_root {
+  if [ "`whoami`" != "root" ]; then
+    echo "Current user is not root (`whoami`)"
+    exit 1
+  fi
+}
+
+# Verify folders needed for backups
+function verify_folders {
+  if [ ! -d $APP_PATH ]; then
+    echo $APP_PATH" is not a directory"
+    exit 1
+  fi
+  if [ ! -d $TMP ]; then
+    echo $TMP" is not a directory"
+    exit 1
+  fi
+  if [ ! -d $BACKUP_DIR ]; then
+    echo $BACKUP_DIR" is not a directory"
+    exit 1
+  else
+    if [ ! -d $BACKUP_DB ]; then
+      mkdir $BACKUP_DB
+    fi
+  fi  
+}
+
+# Verify the database
+function verify_database {
+  if [ ! -d /var/lib/mysql/$DB_NAME ]; then
+    echo $DB_NAME" is not a database"
+    exit 1
+  fi
+}
+
+# Clean olds backups
+function clean_old {
+  rm $BACKUP_DB/* 2> /dev/null
+  rm $BACKUP_DIR/* 2> /dev/null
+}
+
+# Backup and restore the snapshot file
+# used for perform only level 1 backup
+function backup_snapshot {
+  snapshot=$1
+  cp $BACKUP_DB/$snapshot $TMP/$snapshot
+}
+function restore_snapshot {
+  snapshot=$1
+  mv $TMP/$snapshot $BACKUP_DB/$snapshot
+}
+
+
+# Perform a full files backup
+function full_files_backup {
+  clean_old
+  filename=files-$APP_NAME-full-$DATE.tar.gz
+  cd $TMP
+  exclude_str=""
+  for pattern in "${EXCLUDE[@]}"
+  do
+    exclude_str=$exclude_str" --exclude="$pattern
+  done
+  #tar czf $filename $exclude_str --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --level=0 --dereference -C $APP_PATH ../$FOLDER_NAME 2>/dev/null # only with tar > 1.22
+  tar czf $filename $exclude_str --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --dereference -C $APP_PATH ../$FOLDER_NAME 2>/dev/null
+  mv $filename $BACKUP_DIR/
+  BUFFER=("${BUFFER[@]}" $filename)
+}
+
+# Perform a partial (level 1) files backup
+function partial_files_backup {
+  filename=files-$APP_NAME-partial-$DATE.tar.gz
+  cd $TMP
+  exclude_str=""
+  for pattern in "${EXCLUDE[@]}"
+  do
+    exclude_str=$exclude_str" --exclude="$pattern
+  done
+  backup_snapshot snapshot-$APP_NAME
+  #tar czf $filename $exclude_str --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --level=1 --dereference -C $APP_PATH ../$FOLDER_NAME 2>/dev/null # only with tar > 1.22
+  tar czf $filename $exclude_str --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --dereference -C $APP_PATH ../$FOLDER_NAME 2>/dev/null
+  restore_snapshot snapshot-$APP_NAME
+  mv $filename $BACKUP_DIR/
+  BUFFER=("${BUFFER[@]}" $filename)
+}
+
+# Perform the database backup
+function full_database_backup {
+  filename=db-$APP_NAME-full-$DATE.sql.gz
+  cd $TMP
+  mysqldump -h $DB_SERVER -u$DB_USER -p$DB_PASS $DB_NAME | gzip > $filename
+  mv $filename $BACKUP_DIR/
+  BUFFER=("${BUFFER[@]}" $filename)
+}
+
+# Perform a full backup (file + database)
+function full_backup {
+  full_files_backup
+  full_database_backup
+}
+
+# Perform a partial backup (file + database)
+function partial_backup {
+  if [ -f $BACKUP_DB/snapshot-$APP_NAME ]; then
+    partial_files_backup
+    full_database_backup
+  else
+    full_backup
+  fi
+}
+
+function send_reports {
+  full_files_archive=`ls $BACKUP_DIR/ | grep files.*full`
+  full_db_archive=`ls $BACKUP_DIR/ | grep db.*full`
+  message="\n"
+  message=$message"Files for this backup ($APP_NAME):\n\n"
+  hostname=`hostname -f`
+  print_full=false
+  for file in "${BUFFER[@]}"
+  do
+    size=`du -h $BACKUP_DIR/$file | awk '{print $1}'`
+    sha1=`sha1sum $BACKUP_DIR/$file | awk '{print $1}'`
+    message=$message"  - $file ($size):\n  SCP: scp $hostname:$BACKUP_DIR/$file ./\n"
+    message=$message"  SHA1: $sha1\n\n"
+    if [[ $file =~ .*-partial-.* ]]
+    then
+      print_full=true
+    fi
+  done
+  if $print_full; then
+    size=`du -h $BACKUP_DIR/$full_files_archive | awk '{print $1}'`
+    sha1=`sha1sum $BACKUP_DIR/$full_files_archive | awk '{print $1}'`
+    message=$message"  - $full_files_archive ($size):\n  SCP: scp $hostname:$BACKUP_DIR/$full_files_archive ./\n"
+    message=$message"  SHA1: $sha1\n\n"
+  fi
+
+  message=$message"\n\n Extraction instructions:\n"
+  message=$message"\n - FILES: tar --incremental -xzvf *.tar.gz \n - DB   : gunzip *.sql.gz"
+
+  for mail in "${EMAILS[@]}"
+  do
+    echo -e $message | mutt -e 'set realname="Backup"' -e "set from=\"backup@$hostname\"" -s "[Backup] $APP_NAME backup report - $DATE" $mail
+  done
+}
+
+verify_root
+verify_folders
+verify_database
+now=`date +"%a"`
+case $now in
+  Mon)  full_backup;;
+  Tue|Wed|Thu|Fri|Sat|Sun)  partial_backup;;
+  *) ;;
+esac
+
+send_reports
+
+exit 0
