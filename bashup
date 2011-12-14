@@ -1,0 +1,241 @@
+#!/bin/bash 
+#
+# Yuweb Backup Script
+# kurt/yuweb <garnier.etienne-at-gmail.com>
+# v2.0.0
+
+# Settings
+# --------
+
+# Application parameters
+VERBOSE=true
+
+# Application settings
+APP_NAME=""
+APP_PATH=""
+APP_FOLDERS=()
+APP_DATABASES=()
+
+# Database access
+DB_SERVER="localhost"
+DB_USER="root"
+DB_PASS="nirvana11794591"
+
+# System variables
+TMP="/tmp"
+BACKUP_DIR="/root/backups"
+BACKUP_DB=$BACKUP_DIR"/db"
+DATE=`date +%Y-%m-%d-%s`
+BUFFER=( )
+MYSQL_DB_DIR="/var/lib/mysql"
+CONFIG_FILES="/etc/bashup"
+ONLY_APP=""
+NO_FILES=false
+NO_DBS=false
+
+# Functions
+# ---------
+
+# Verbose function
+function log {
+  if $VERBOSE; then echo $@; fi
+}
+
+# Verify the current user
+function verify_root {
+  if [ "`whoami`" != "root" ]; then
+    echo "Current user is not root (`whoami`)"
+    exit 1
+  fi
+}
+
+# Verify folders
+function verify_folders {
+  if [ ! -d $APP_PATH ]; then
+    echo $APP_PATH" is not a directory"
+    exit 1
+  fi
+  for app_folder in "${APP_FOLDERS[@]}"
+  do
+    if [ ! -d $APP_PATH/$app_folder ]; then
+      echo $app_folder" is not a directory"
+      exit 1
+    fi
+  done
+  if [ ! -d $TMP ]; then
+    echo $TMP" is not a directory"
+    exit 1
+  fi
+  if [ ! -d $BACKUP_DIR ]; then
+    echo $BACKUP_DIR" is not a directory"
+    exit 1
+  else
+    if [ ! -d $BACKUP_DB ]; then
+      mkdir $BACKUP_DB
+    fi
+  fi
+  if [ ${#APP_DATABASES[@]} != 0 -a ! -d $MYSQL_DB_DIR ]; then
+    echo $MYSQL_DB_DIR" is not a MySQL directory"
+    exit 1
+  fi
+  if [ ! -d $CONFIG_FILES ]; then
+    echo $CONFIG_FILES" is not a directory"
+    exit 1
+  fi
+}
+
+# Verify database credentials
+function verify_database_credentials {
+  if ! mysql -u $DB_USER -p$DB_PASS -h $DB_SERVER -e ''; then
+    echo "Wrong mysql credentials for $DB_SERVER"
+    exit 1
+  fi
+}
+
+# Verify databases
+function verify_databases {
+  for db_name in "${APP_DATABASES[@]}"
+  do
+    if [ ! -d $MYSQL_DB_DIR/$db_name ]; then
+      echo $db_name" is not a database"
+      exit 1
+    fi
+  done
+}
+
+# Read config files
+function read_config {
+  config_file=$1
+  source $config_file
+  APP_NAME=$name
+  APP_PATH=$path
+  APP_FOLDERS=( ${folders[@]} )
+  APP_DATABASES=( ${databases[@]} )
+}
+
+# Backup folders
+function backup_folders {
+  log ">> backup ${#APP_FOLDERS[@]} folders: ${APP_FOLDERS[@]}"
+  for app_folder in "${APP_FOLDERS[@]}"
+  do
+    basename=`echo ${app_folder//\//_}`
+    filename=files-$APP_NAME-$basename-full-$DATE.tar.gz
+    cd $TMP
+    tar czf $filename --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --dereference -C $APP_PATH $app_folder 2>/dev/null
+    mv $filename $BACKUP_DIR/
+    if [ -f $BACKUP_DIR/$filename ]; then
+      BUFFER=("${BUFFER[@]}" $filename)
+    else
+      log "!! an error appear while backuping $filename"
+      exit 1
+    fi
+  done
+}
+
+# Backup databases
+function backup_databases {
+  log ">> backup ${#APP_DATABASES[@]} databases: ${APP_DATABASES[@]}"
+  for db_name in "${APP_DATABASES[@]}"
+  do
+    filename=db-$APP_NAME-$db_name-full-$DATE.sql.gz
+    cd $TMP
+    mysqldump -h $DB_SERVER -u$DB_USER -p$DB_PASS $db_name | gzip > $filename
+    mv $filename $BACKUP_DIR/
+    if [ -f $BACKUP_DIR/$filename ]; then
+      BUFFER=("${BUFFER[@]}" $filename)
+    else
+      log "!! an error appear while backuping $filename"
+      exit 1
+    fi
+  done
+}
+
+# Backup an app
+function backup_app {
+  read_config $1
+  log ":: [ $APP_NAME ]"
+  verify_root
+  verify_folders
+  if [ ${#APP_DATABASES[@]} != 0 ]; then
+    verify_database_credentials
+    verify_databases
+  fi
+  log ">> configuration seems to be correct."
+  if ! $NO_FILES; then backup_folders; fi
+  if [ ${#APP_DATABASES[@]} != 0 ]; then
+    if ! $NO_DBS; then backup_databases; fi
+  fi
+}
+
+# Backup all apps
+function backup_all {
+  # Read config file
+  if [ `ls -1A /etc/bashup/ | wc -l` != 0 ]; then
+    for config in $CONFIG_FILES/*.conf
+    do
+      backup_app $config
+    done
+  else
+    log "!! bashup config file is empty"
+    exit 1
+  fi
+}
+
+function print_usage { 
+  cat << EOF
+usage: $0 action options
+
+ACTIONS:
+   backup  Backup all the app configured in $CONFIG_FILES
+
+OPTIONS:
+   -a app  Perform action only on the specified app
+   -h      Show this message
+   -s      Silent mode
+   -f      Files and folders only
+   -d      Databases only
+EOF
+}
+
+# Main exec
+# ---------
+
+action=$1
+shift
+while getopts "hsa:fd" OPTION
+do
+  case $OPTION in
+    h)
+      print_usage
+      exit 0
+      ;;
+    s)
+      VERBOSE=false
+      ;;
+    a)
+      ONLY_APP=$OPTARG
+      ;;
+    f)
+      NO_DBS=true
+      ;;
+    d)
+      NO_FILES=true
+      ;;
+  esac
+done
+
+case $action in
+  backup)
+    if [ ! $ONLY_APP ]; then
+      backup_all
+    else
+      backup_app $ONLY_APP".conf"
+    fi
+    ;;
+  *)
+    print_usage
+    exit 1
+    ;;
+esac
+
+exit 0

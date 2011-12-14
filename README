@@ -1,5 +1,14 @@
 v1.0.0 'Simple script'
 -----------------------
+* Support for local backup
+* Incremental backup
+* Files and database backup
+* Email alert
 
 v2.0.0 'Backup service'
 -----------------------
+* DONE - Support for folders and databases backups
+* DONE - Support for config file
+* Send backups files on amazon S3
+* Restoration functions
+* Mail alert
