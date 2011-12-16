@@ -24,7 +24,7 @@ DB_PASS="nirvana11794591"
 
 # System variables
 TMP="/tmp"
-BACKUP_DIR="/root/backups"
+BACKUP_DIR="/tmp/backups"
 BACKUP_DB=$BACKUP_DIR"/db"
 DATE=`date +%Y-%m-%d-%s`
 BUFFER=( )
@@ -175,7 +175,7 @@ function backup_folders {
     cd $TMP
     tar czf $filename --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --dereference -C $APP_PATH $app_folder 2>/dev/null
     mv $filename $BACKUP_DIR/
-    if [ -f $BACKUP_DIR/$filename ]; then
+    if [ -f $BACKUP_DIR/$filename ]; then 
       BUFFER=("${BUFFER[@]}" $filename)
     else
       log "!! an error appear while backuping $filename"
@@ -296,6 +296,11 @@ do
       ;;
   esac
 done
+
+# Read bashup config file if exist
+if [ -f $CONFIG_DIR/bashup.conf ]; then
+  source $CONFIG_DIR/bashup.conf
+fi
 
 case $action in
   backup)
