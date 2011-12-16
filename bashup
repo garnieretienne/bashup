@@ -20,7 +20,7 @@ APP_DATABASES=()
 # Database access
 DB_SERVER="localhost"
 DB_USER="root"
-DB_PASS="nirvana11794591"
+DB_PASS=""
 
 # System variables
 TMP="/tmp"
