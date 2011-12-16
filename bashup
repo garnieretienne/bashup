@@ -9,6 +9,7 @@
 
 # Application parameters
 VERBOSE=true
+BUCKET=""
 
 # Application settings
 APP_NAME=""
@@ -28,10 +29,12 @@ BACKUP_DB=$BACKUP_DIR"/db"
 DATE=`date +%Y-%m-%d-%s`
 BUFFER=( )
 MYSQL_DB_DIR="/var/lib/mysql"
-CONFIG_FILES="/etc/bashup"
+CONFIG_DIR="/etc/bashup"
 ONLY_APP=""
 NO_FILES=false
 NO_DBS=false
+S3=false
+S3CFG="$CONFIG_DIR/s3cfg"
 
 # Functions
 # ---------
@@ -78,8 +81,8 @@ function verify_folders {
     echo $MYSQL_DB_DIR" is not a MySQL directory"
     exit 1
   fi
-  if [ ! -d $CONFIG_FILES ]; then
-    echo $CONFIG_FILES" is not a directory"
+  if [ ! -d $CONFIG_DIR ]; then
+    echo $CONFIG_DIR" is not a directory"
     exit 1
   fi
 }
@@ -103,6 +106,50 @@ function verify_databases {
   done
 }
 
+# Verify s3cmd is installed
+function verify_s3cmd_bin {
+  if [ ! -f /usr/bin/s3cmd ]; then
+    echo "/usr/bin/s3cmd does not exist, is s3cmd installed"
+    exit 1
+  fi
+}
+
+# Verify the amazon config file
+# /etc/bashup/s3.conf
+function verify_s3_conf {
+  if [ ! -f $CONFIG_DIR/s3.conf ]; then
+    echo "no s3 config file found ($CONFIG_DIR/s3.conf)"
+    exit 1
+  fi
+}
+
+# Verify as3 credentials
+# /etc/bashup/s3cfg
+function verify_s3cfg {
+  if [ ! -f $S3CFG ]; then
+    echo "No s3 config file found (must be in $S3CFG)"
+    exit 1
+  fi
+}
+
+# Verify bucket access
+# List
+function verify_bucket_list {
+  if ! s3cmd -c $S3CFG ls s3://$BUCKET > /dev/null; then
+    echo "Cannot list the specified bucket ($BUCKET)"
+    exit 1
+  fi
+}
+
+# Verify all s3 related functions
+function verify_s3stuff {
+  verify_s3cmd_bin
+  verify_s3cfg
+  verify_s3_conf
+  read_s3_config
+  verify_bucket_list
+}
+
 # Read config files
 function read_config {
   config_file=$1
@@ -111,6 +158,11 @@ function read_config {
   APP_PATH=$path
   APP_FOLDERS=( ${folders[@]} )
   APP_DATABASES=( ${databases[@]} )
+}
+
+# Read S3 config file
+function read_s3_config {
+  source $CONFIG_DIR/s3.conf
 }
 
 # Backup folders
@@ -170,8 +222,8 @@ function backup_app {
 # Backup all apps
 function backup_all {
   # Read config file
-  if [ `ls -1A /etc/bashup/ | wc -l` != 0 ]; then
-    for config in $CONFIG_FILES/*.conf
+  if [ `ls -1A $CONFIG_DIR/apps | wc -l` != 0 ]; then
+    for config in $CONFIG_DIR/apps/*.conf
     do
       backup_app $config
     done
@@ -181,12 +233,29 @@ function backup_all {
   fi
 }
 
+# Upload backups files on S3
+function sync_s3 {
+  verify_s3stuff
+  read_s3_config
+  log ">> moving ${#BUFFER[@]} files to amazon s3 bucket: $BUCKET"
+  for file in "${BUFFER[@]}"
+  do
+    s3cmd -c $S3CFG put $BACKUP_DIR/$file s3://$BUCKET --no-progress &> /dev/null
+    if ! s3cmd -c $S3CFG ls s3://$BUCKET/$file | grep $file > /dev/null; then
+      log "!! error while processing $file upload to $BUCKET bucket"
+      exit 1
+    else
+      rm $BACKUP_DIR/$file
+    fi
+  done
+}
+
 function print_usage { 
   cat << EOF
-usage: $0 action options
+usage: $0 action [options]
 
 ACTIONS:
-   backup  Backup all the app configured in $CONFIG_FILES
+   backup  Backup all the apps configured in $CONFIG_DIR
 
 OPTIONS:
    -a app  Perform action only on the specified app
@@ -194,6 +263,7 @@ OPTIONS:
    -s      Silent mode
    -f      Files and folders only
    -d      Databases only
+   -r      Upload backups files on S3 bucket
 EOF
 }
 
@@ -202,7 +272,7 @@ EOF
 
 action=$1
 shift
-while getopts "hsa:fd" OPTION
+while getopts "hsa:fdr" OPTION
 do
   case $OPTION in
     h)
@@ -221,6 +291,9 @@ do
     d)
       NO_FILES=true
       ;;
+    r)
+      S3=true
+      ;;
   esac
 done
 
@@ -231,6 +304,7 @@ case $action in
     else
       backup_app $ONLY_APP".conf"
     fi
+    if $S3; then sync_s3;fi
     ;;
   *)
     print_usage

@@ -9,6 +9,10 @@ v2.0.0 'Backup service'
 -----------------------
 * DONE - Support for folders and databases backups
 * DONE - Support for config file
-* Send backups files on amazon S3
+* DONE - Send backups files on amazon S3
 * Restoration functions
 * Mail alert
+* CRC and sfv check
+* Support log file
+
+Write sample config files for /etc/bashup
