@@ -165,6 +165,13 @@ function read_s3_config {
   source $CONFIG_DIR/s3.conf
 }
 
+# Read Database config file
+function read_mysql_config {
+  if [ $CONFIG_DIR/mysql.conf ]; then
+    source $CONFIG_DIR/mysql.conf
+  fi
+}
+
 # Backup folders
 function backup_folders {
   log ">> backup ${#APP_FOLDERS[@]} folders: ${APP_FOLDERS[@]}"
@@ -209,6 +216,7 @@ function backup_app {
   verify_root
   verify_folders
   if [ ${#APP_DATABASES[@]} != 0 ]; then
+    read_mysql_config
     verify_database_credentials
     verify_databases
   fi
