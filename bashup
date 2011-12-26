@@ -28,7 +28,6 @@ BACKUP_DIR="/tmp/backups"
 BACKUP_DB=$BACKUP_DIR"/db"
 DATE=`date +%Y-%m-%d-%s`
 BUFFER=( )
-MYSQL_DB_DIR="/var/lib/mysql"
 CONFIG_DIR="/etc/bashup"
 ONLY_APP=""
 NO_FILES=false
@@ -77,10 +76,6 @@ function verify_folders {
       mkdir $BACKUP_DB
     fi
   fi
-  if [ ${#APP_DATABASES[@]} != 0 -a ! -d $MYSQL_DB_DIR ]; then
-    echo $MYSQL_DB_DIR" is not a MySQL directory"
-    exit 1
-  fi
   if [ ! -d $CONFIG_DIR ]; then
     echo $CONFIG_DIR" is not a directory"
     exit 1
@@ -99,7 +94,7 @@ function verify_database_credentials {
 function verify_databases {
   for db_name in "${APP_DATABASES[@]}"
   do
-    if [ ! -d $MYSQL_DB_DIR/$db_name ]; then
+    if ! mysql -h $DB_SERVER -u $DB_USER -p$DB_PASS -e "show databases" | grep $db_name > /dev/null; then
       echo $db_name" is not a database"
       exit 1
     fi
