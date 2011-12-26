@@ -162,7 +162,7 @@ function read_s3_config {
 
 # Read Database config file
 function read_mysql_config {
-  if [ $CONFIG_DIR/mysql.conf ]; then
+  if [ -f $CONFIG_DIR/mysql.conf ]; then
     source $CONFIG_DIR/mysql.conf
   fi
 }
