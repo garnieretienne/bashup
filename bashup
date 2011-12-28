@@ -175,7 +175,8 @@ function backup_folders {
     basename=`echo ${app_folder//\//_}`
     filename=files-$APP_NAME-$basename-full-$DATE.tar.gz
     cd $TMP
-    tar czf $filename --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --dereference -C $APP_PATH $app_folder 2>/dev/null
+    #tar czf $filename --listed-incremental=$BACKUP_DB/snapshot-$APP_NAME --dereference -C $APP_PATH $app_folder 2>/dev/null
+    tar czf $filename --dereference -C $APP_PATH $app_folder 2>/dev/null
     mv $filename $BACKUP_DIR/
     if [ -f $BACKUP_DIR/$filename ]; then 
       BUFFER=("${BUFFER[@]}" $filename)
